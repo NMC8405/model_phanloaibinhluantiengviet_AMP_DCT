@@ -113,3 +113,21 @@ class AverageMeter:
     @property
     def avg(self) -> float:
         return self.sum / self.count if self.count > 0 else 0.0
+
+
+def load_tokenizer(model_name: str) -> Any:
+    """Tải AutoTokenizer với cơ chế fallback sang cache local nếu mất kết nối mạng."""
+    from transformers import AutoTokenizer
+    try:
+        # Thử tải thông thường từ HuggingFace Hub (có kiểm tra update)
+        return AutoTokenizer.from_pretrained(model_name)
+    except Exception as e:
+        # Nếu gặp lỗi mạng (timeout, WinError 10054, block...), tải trực tiếp từ cache local
+        try:
+            return AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+        except Exception as e_local:
+            raise RuntimeError(
+                f"Không thể tải tokenizer '{model_name}' từ HuggingFace Hub lẫn bộ nhớ đệm local cache.\n"
+                f"Lỗi mạng: {e}\nLỗi local cache: {e_local}"
+            ) from e
+

@@ -42,8 +42,7 @@ from src.evaluate import load_model_for_inference
 from src.preprocessing.metadata_processor import MetadataProcessor
 from src.preprocessing.text_cleaner import TextCleaner
 from src.preprocessing.word_segmenter import WordSegmenter
-from src.utils import get_device
-from transformers import AutoTokenizer
+from src.utils import get_device, load_tokenizer
 
 
 class SentimentPredictor:
@@ -55,7 +54,7 @@ class SentimentPredictor:
     ):
         self.device = device or get_device()
         self.model, self.model_config = load_model_for_inference(checkpoint_path, self.device)
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_config["phobert_model_name"])
+        self.tokenizer = load_tokenizer(self.model_config["phobert_model_name"])
         self.metadata_processor = MetadataProcessor.load(metadata_scaler_path)
 
         self.cleaner = TextCleaner()

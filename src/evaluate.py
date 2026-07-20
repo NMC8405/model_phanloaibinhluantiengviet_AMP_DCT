@@ -44,13 +44,11 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
-
 import config as cfg
 from src.dataset import dataframe_to_dataset, make_collate_fn
 from src.model import PhoBertAMP
 from src.preprocessing.metadata_processor import MetadataProcessor
-from src.utils import get_device, load_checkpoint, save_json, setup_logger
+from src.utils import get_device, load_checkpoint, save_json, setup_logger, load_tokenizer
 
 
 def compute_metrics(y_true: List[int], y_pred: List[int]) -> Dict:
@@ -189,7 +187,7 @@ def main():
     model, model_config = load_model_for_inference(args.checkpoint, device)
     logger.info(f"Đã tải checkpoint: {args.checkpoint}")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_config["phobert_model_name"])
+    tokenizer = load_tokenizer(model_config["phobert_model_name"])
     metadata_processor = MetadataProcessor.load(args.metadata_scaler)
 
     test_dataset = dataframe_to_dataset(
