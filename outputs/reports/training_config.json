@@ -1,0 +1,73 @@
+{
+  "model_architecture": "PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)",
+  "model_config": {
+    "phobert_model_name": "vinai/phobert-base",
+    "num_classes": 3,
+    "cnn_filter_sizes": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "cnn_num_filters": 128,
+    "metadata_dim": 3,
+    "per_field_embed_dim": 32,
+    "gate_hidden_dim": 128,
+    "gate_dropout": 0.2,
+    "fc_hidden_dim": 256,
+    "dropout": 0.3,
+    "freeze_phobert": false,
+    "gate_max_val": 0.5,
+    "metadata_dropout": 0.3
+  },
+  "train_args": {
+    "train_path": "c:\\DevLTDD\\Đồ án tốt nghiệp\\model_phobert_metadata_cnn\\phobert_cnn_metadata_sentiment\\data\\processed\\train.csv",
+    "val_path": "c:\\DevLTDD\\Đồ án tốt nghiệp\\model_phobert_metadata_cnn\\phobert_cnn_metadata_sentiment\\data\\processed\\val.csv",
+    "phobert_model_name": "vinai/phobert-base",
+    "max_length": 256,
+    "cnn_num_filters": 128,
+    "per_field_embed_dim": 32,
+    "gate_hidden_dim": 128,
+    "gate_dropout": 0.2,
+    "fc_hidden_dim": 256,
+    "dropout": 0.3,
+    "freeze_phobert": false,
+    "epochs": 20,
+    "batch_size": 8,
+    "eval_batch_size": 16,
+    "gradient_accumulation_steps": 4,
+    "lr_phobert": 2e-05,
+    "lr_head": 0.001,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.1,
+    "max_grad_norm": 1.0,
+    "patience": 4,
+    "seed": 42,
+    "num_workers": 0,
+    "no_class_weights": false,
+    "no_amp": false,
+    "gate_reg_lambda": 0.015,
+    "gate_max_val": 0.5,
+    "metadata_dropout": 0.3
+  },
+  "dataset_stats": {
+    "train_samples": 13239,
+    "val_samples": 2306,
+    "train_label_dist": {
+      "negative": 4413,
+      "normal": 4413,
+      "positive": 4413
+    },
+    "val_label_dist": {
+      "positive": 946,
+      "normal": 776,
+      "negative": 584
+    }
+  },
+  "total_params": 136612228,
+  "trainable_params": 136612228,
+  "best_epoch": 17,
+  "best_val_macro_f1": 0.9957183068878476,
+  "final_avg_gate_score": 0.11896360787625705,
+  "device": "cuda"
+}

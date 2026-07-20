@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Môi trường ảo
+venv/
+.venv/
+env/
+
+# Dữ liệu & model (thường rất nặng, không nên đưa lên Git)
+data/processed/*.csv
+data/raw/*.csv
+!data/raw/comments.csv
+outputs/checkpoints/*.pt
+outputs/logs/*.log
+outputs/reports/*.csv
+
+# Giữ lại cấu trúc thư mục rỗng
+!data/processed/.gitkeep
+!outputs/checkpoints/.gitkeep
+!outputs/logs/.gitkeep
+!outputs/reports/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

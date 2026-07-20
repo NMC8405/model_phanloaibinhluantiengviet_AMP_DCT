@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phân tích cảm xúc bình luận - PhoBERT + CNN + Metadata</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+
+            --pos-color: #10b981;
+            --neu-color: #3b82f6;
+            --neg-color: #ef4444;
+
+            --pos-bg: rgba(16, 185, 129, 0.15);
+            --neu-bg: rgba(59, 130, 246, 0.15);
+            --neg-bg: rgba(239, 68, 68, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .main-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            backdrop-filter: blur(20px);
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .main-card {
+                grid-template-columns: 1fr;
+                padding: 24px;
+                gap: 32px;
+            }
+        }
+
+        .form-section {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 120px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            padding: 16px;
+            font-size: 0.95rem;
+            resize: none;
+            outline: none;
+        }
+
+        textarea:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            padding: 12px 16px;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        input[type="number"]:focus {
+            border-color: var(--accent);
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+            margin-top: 8px;
+        }
+
+        .checkbox-group input {
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+        }
+
+        .checkbox-group span {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .submit-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+
+        .submit-btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .submit-btn.loading {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .result-section {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 20px;
+            border: 1px solid var(--card-border);
+            padding: 24px;
+            min-height: 300px;
+        }
+
+        .result-placeholder {
+            text-align: center;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            height: 100%;
+        }
+
+        .result-placeholder svg {
+            width: 64px;
+            height: 64px;
+            fill: var(--text-secondary);
+            opacity: 0.3;
+        }
+
+        .result-content {
+            display: none;
+            flex-direction: column;
+            gap: 24px;
+            height: 100%;
+        }
+
+        .badge-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+
+        .badge {
+            padding: 8px 20px;
+            border-radius: 100px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .badge.positive {
+            color: var(--pos-color);
+            background: var(--pos-bg);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge.normal {
+            color: var(--neu-color);
+            background: var(--neu-bg);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .badge.negative {
+            color: var(--neg-color);
+            background: var(--neg-bg);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .confidence-label {
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .confidence-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-top: 4px;
+        }
+
+        .probability-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .prob-item {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .prob-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .prob-bar-container {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 100px;
+            overflow: hidden;
+        }
+
+        .prob-bar {
+            height: 100%;
+            border-radius: 100px;
+            width: 0%;
+        }
+
+        .prob-bar.positive {
+            background: var(--pos-color);
+        }
+
+        .prob-bar.normal {
+            background: var(--neu-color);
+        }
+
+        .prob-bar.negative {
+            background: var(--neg-color);
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Phân Tích Cảm Xúc Bình Luận</h1>
+            <p>Kiến trúc đề xuất: PhoBERT + CNN + Metadata (Dự án tốt nghiệp)</p>
+        </header>
+
+        <main class="main-card">
+            <!-- Form Section -->
+            <section class="form-section">
+                <div class="form-group">
+                    <label for="comment">Nội dung bình luận</label>
+                    <textarea id="comment"
+                        placeholder="Nhập bình luận tiếng Việt cần kiểm tra... ví dụ: Shop giao hàng siêu nhanh, đóng gói cẩn thận, sản phẩm dùng rất tốt!"></textarea>
+                </div>
+
+                <div class="metadata-grid">
+                    <div class="form-group">
+                        <label for="rating">Đánh giá (1-5 Sao)</label>
+                        <input type="number" id="rating" min="1" max="5" value="5" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="likes">Lượt thích (Likes)</label>
+                        <input type="number" id="likes" min="0" value="0" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="quality">Chất lượng (1-5 Sao)</label>
+                        <input type="number" id="quality" min="1" max="5" value="5" step="0.5">
+                    </div>
+                </div>
+
+                <button class="submit-btn" id="submitBtn" onclick="analyzeSentiment()">
+                    <span class="spinner" id="spinner"></span>
+                    <span id="btnText">Phân tích</span>
+                </button>
+            </section>
+
+            <!-- Result Section -->
+            <section class="result-section">
+                <div class="result-placeholder" id="placeholder">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+                    </svg>
+                    <p>Nhập bình luận và nhấn "Phân tích" để xem kết quả cảm xúc.</p>
+                </div>
+
+                <div class="result-content" id="resultContent">
+                    <div style="text-align: center;">
+                        <div class="badge-container">
+                            <span class="badge" id="labelBadge">Positive</span>
+                        </div>
+                        <div class="confidence-label">
+                            Độ tin cậy:
+                            <div class="confidence-value" id="confidenceVal">98.5%</div>
+                        </div>
+                    </div>
+
+                    <div class="probability-list">
+                        <!-- Positive -->
+                        <div class="prob-item">
+                            <div class="prob-header">
+                                <span>Tích cực (Positive)</span>
+                                <span id="probPosVal">0%</span>
+                            </div>
+                            <div class="prob-bar-container">
+                                <div class="prob-bar positive" id="probPosBar"></div>
+                            </div>
+                        </div>
+
+                        <!-- Normal -->
+                        <div class="prob-item">
+                            <div class="prob-header">
+                                <span>Bình thường (Normal)</span>
+                                <span id="probNeuVal">0%</span>
+                            </div>
+                            <div class="prob-bar-container">
+                                <div class="prob-bar normal" id="probNeuBar"></div>
+                            </div>
+                        </div>
+
+                        <!-- Negative -->
+                        <div class="prob-item">
+                            <div class="prob-header">
+                                <span>Tiêu cực (Negative)</span>
+                                <span id="probNegVal">0%</span>
+                            </div>
+                            <div class="prob-bar-container">
+                                <div class="prob-bar negative" id="probNegBar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            &copy; 2026 Đồ án tốt nghiệp - Hệ thống AI phân tích cảm xúc TMĐT
+        </footer>
+    </div>
+
+    <script>
+        async function analyzeSentiment() {
+            const text = document.getElementById('comment').value.trim();
+            const rating = parseFloat(document.getElementById('rating').value) || 5.0;
+            const numLikes = parseFloat(document.getElementById('likes').value) || 0.0;
+            const quality = parseFloat(document.getElementById('quality').value) || 5.0;
+
+            if (!text) {
+                alert('Vui lòng nhập nội dung bình luận.');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            const spinner = document.getElementById('spinner');
+            const btnText = document.getElementById('btnText');
+            const placeholder = document.getElementById('placeholder');
+            const resultContent = document.getElementById('resultContent');
+
+            // Loading state
+            submitBtn.classList.add('loading');
+            spinner.style.display = 'block';
+            btnText.textContent = 'Đang phân tích...';
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        rating: rating,
+                        num_likes: numLikes,
+                        quality: quality
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Có lỗi xảy ra khi kết nối tới AI Service.');
+                }
+
+                const result = await response.json();
+
+                // Hide placeholder & show result
+                placeholder.style.display = 'none';
+                resultContent.style.display = 'flex';
+
+                // Set badge
+                const badge = document.getElementById('labelBadge');
+                badge.className = `badge ${result.label}`;
+
+                // Map label name to display string
+                let labelText = '';
+                if (result.label === 'positive') labelText = '😊 Tích cực';
+                else if (result.label === 'normal') labelText = '😐 Bình thường';
+                else if (result.label === 'negative') labelText = '😡 Tiêu cực';
+
+                badge.textContent = labelText;
+
+                // Set confidence
+                document.getElementById('confidenceVal').textContent = `${(result.confidence * 100).toFixed(1)}%`;
+
+                // Set progress bars
+                const posProb = result.probabilities.positive || 0;
+                const neuProb = result.probabilities.normal || 0;
+                const negProb = result.probabilities.negative || 0;
+
+                document.getElementById('probPosVal').textContent = `${(posProb * 100).toFixed(1)}%`;
+                document.getElementById('probPosBar').style.width = `${posProb * 100}%`;
+
+                document.getElementById('probNeuVal').textContent = `${(neuProb * 100).toFixed(1)}%`;
+                document.getElementById('probNeuBar').style.width = `${neuProb * 100}%`;
+
+                document.getElementById('probNegVal').textContent = `${(negProb * 100).toFixed(1)}%`;
+                document.getElementById('probNegBar').style.width = `${negProb * 100}%`;
+
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                // Restore button state
+                submitBtn.classList.remove('loading');
+                spinner.style.display = 'none';
+                btnText.textContent = 'Phân tích';
+            }
+        }
+    </script>
+</body>
+
+</html>
