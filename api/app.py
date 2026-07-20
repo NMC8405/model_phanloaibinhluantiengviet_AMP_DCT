@@ -135,3 +135,9 @@ def root():
             return f.read()
     return "<h3>API phân loại cảm xúc bình luận đang chạy.</h3>"
 
+
+if __name__ == "__main__":
+    import uvicorn
+    # Chạy uvicorn trực tiếp khi thực thi file này bằng python api/app.py
+    uvicorn.run("api.app:app", host="127.0.0.1", port=8000, reload=True)
+
