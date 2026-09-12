@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 class CommentInput(BaseModel):
     text: str = Field(..., min_length=1, description="Nội dung bình luận cần phân loại")
     rating: Optional[float] = Field(None, ge=1, le=5, description="Số sao đánh giá (1-5)")
-    num_likes: Optional[float] = Field(None, ge=0, description="Số lượt thích của bình luận")
+    num_likes: Optional[float] = Field(
+        None, ge=0, description="Số lượt thích (đã bỏ trong mô hình v2, giữ lại để tương thích ngược)"
+    )
     quality: Optional[float] = Field(
         None, ge=1, le=5, description="Điểm chất lượng sản phẩm (1-5)"
     )
@@ -24,7 +26,6 @@ class CommentInput(BaseModel):
                 {
                     "text": "Giao hàng nhanh, đóng gói cẩn thận, sản phẩm dùng rất tốt!",
                     "rating": 5,
-                    "num_likes": 12,
                     "quality": 5.0,
                 }
             ]

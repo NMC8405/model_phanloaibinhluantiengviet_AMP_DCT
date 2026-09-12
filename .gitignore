@@ -29,6 +29,10 @@ outputs/reports/*.csv
 .idea/
 *.swp
 
-# OS
+# OS & Office temporary
 .DS_Store
 Thumbs.db
+~$*.docx
+~$*.xlsx
+*.tmp
+

@@ -46,11 +46,12 @@ LABEL_LIST = ["negative", "normal", "positive"]  # tiêu cực, bình thường,
 LABEL2ID: Dict[str, int] = {label: idx for idx, label in enumerate(LABEL_LIST)}
 ID2LABEL: Dict[int, str] = {idx: label for idx, label in enumerate(LABEL_LIST)}
 
-# Metadata đi kèm mỗi bình luận: rating, lượt thích, chất lượng sản phẩm
+# Metadata đi kèm mỗi bình luận: rating, chất lượng sản phẩm
+# (num_likes đã được loại bỏ theo yêu cầu để tránh nhiễu và không ảnh hưởng mô hình)
 # type: "numeric" (co scale) hoac "binary" (0/1, khong can scale)
 METADATA_SCHEMA: Dict[str, str] = {
     "rating": "numeric",             # so sao danh gia 1-5
-    "num_likes": "numeric_log",      # luot thich binh luan (phan phoi lech -> log1p)
+    # "num_likes": "numeric_log",    # da bo luot thich
     "quality": "numeric",            # diem chat luong san pham 1-5 (tu cot 'Chat luong san pham')
 }
 METADATA_COLUMNS: List[str] = list(METADATA_SCHEMA.keys())
@@ -70,7 +71,7 @@ class ModelConfig:
     cnn_num_filters: int = 128  # So filter moi kernel size
 
     # Nhanh metadata - Per-Field Embedding
-    metadata_dim: int = METADATA_DIM           # so truong metadata (3: rating, likes, quality)
+    metadata_dim: int = METADATA_DIM           # so truong metadata (2: rating, quality)
     per_field_embed_dim: int = 32              # moi truong metadata embed thanh 32-dim
     
     @property
@@ -108,14 +109,14 @@ class TrainConfig:
     patience: int = 4     # Tang tu 3 len 4 cho du lieu lon hon (it overfit hon)
 
     lr_phobert: float = 2e-5      # learning rate rieng cho PhoBERT (fine-tune)
-    lr_head: float = 1e-3         # learning rate cho CNN + metadata + FC head
+    lr_head: float = 2e-4         # learning rate cho CNN + metadata + FC head (giam tu 1e-3 cho dataset lon 56k)
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1     # Tang tu 0.06 len 0.1 cho du lieu lon hon
     max_grad_norm: float = 1.0
 
     # Adaptive Metadata Gate regularization
-    gate_reg_lambda: float = 0.015  # L1 penalty tren gate score - khuyen khich model
-                                   # tu quyet dinh khong dung metadata khi text du ro rang
+    gate_reg_lambda: float = 0.015  # L1 penalty tren gate score - gia tri thiet ke chuan
+                                    # giup gate dao dong can bang (0.15 - 0.35) tren tap 56k
 
     use_class_weights: bool = True
     use_amp: bool = True          # mixed precision - quan trong voi GPU 8GB (RTX 4060)

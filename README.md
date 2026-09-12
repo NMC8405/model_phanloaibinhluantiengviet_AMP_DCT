@@ -4,7 +4,7 @@ Hệ thống AI phân loại bình luận thương mại điện tử tiếng Vi
 **negative (tiêu cực) / normal (bình thường) / positive (tích cực)**, sử dụng
 kiến trúc **PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)** — kết hợp ngữ
 nghĩa văn bản (PhoBERT + Multi-Kernel CNN) với thông tin metadata đi kèm
-bình luận (rating, lượt thích, chất lượng sản phẩm) thông qua cơ chế
+bình luận (rating, chất lượng sản phẩm) thông qua cơ chế
 **Adaptive Metadata Gate** tự động quyết định mức độ sử dụng metadata.
 
 ## Kiến trúc mô hình đề xuất
@@ -19,23 +19,24 @@ Văn bản → Tiền xử lý → Word Segmentation → PhoBERT Tokenizer → P
                                                           │   Gate ───────┤
                                                           │  (σ ∈ 0~1)   │
 Metadata → Tiền xử lý → Per-Field Embedding ─────────────┘               │
-  (rating→32d, likes→32d, quality→32d = 96d)                              │
+  (rating→32d, quality→32d = 64d)                                         │
                                                                           │
                      Gated Metadata (gate × meta_vec) ────────────────────┘
                                                                           │
-                     Concatenate(text_vec, gated_meta) → LayerNorm        │
+                     Concatenate(text_vec, gated_meta) → LayerNorm (576d) │
                      → FC(256) + ReLU → Dropout → Classifier → 3 lớp
 ```
 
 **Điểm khác biệt so với mô hình cũ (PhoBERT + CNN + Metadata):**
 
-| Thành phần | Mô hình cũ | PhoBERT-AMP (mới) |
+| Thành phần | Mô hình cũ | PhoBERT-AMP (v2) |
 |---|---|---|
 | CNN | Conv1D → ReLU → MaxPool | Conv1D → **BatchNorm** → ReLU → MaxPool |
-| Metadata Embedding | Dense chung (3→64) | **Per-Field Embedding** (mỗi trường riêng 1→32) |
+| Metadata Embedding | Dense chung (3→64) | **Per-Field Embedding** (mỗi trường riêng 1→32, bỏ num_likes để giảm nhiễu) |
 | Fusion | Concat cứng | **Adaptive Metadata Gate** (học trọng số ∈ 0-1) |
 | Normalization | Không có | **LayerNorm** trước FC |
-| Kích thước fusion | 576 (512+64) | 608 (512+96) |
+| Kích thước fusion | 576 (512+64) | **576** (512 + 64) |
+
 
 ---
 
@@ -45,15 +46,19 @@ Metadata → Tiền xử lý → Per-Field Embedding ─────────
 ├── config.py                    # Cấu hình tập trung (đường dẫn, hyperparameter, schema)
 ├── requirements.txt
 ├── setup.py                     # Hỗ trợ pip install -e . (stable imports)
+├── docs/                        # Báo cáo học thuật và tài liệu cải tiến mô hình
+│   ├── Báo_cáo_chi_tiết_Dự_án_PhoBERT_AMP.docx
+│   ├── cải tiến model.docx      # Nghiên cứu cơ chế Cross-Attention
+│   └── Tóm tắt mô hình đề xuất.docx
 ├── data/
-│   ├── raw/comments.csv         # Dữ liệu 15,378 dòng (chuyển đổi từ update.xlsx)
+│   ├── raw/comments.csv         # Dữ liệu 56,878 dòng (chuyển đổi từ DataCrawl.xlsx)
 │   └── processed/                # train.csv / val.csv / test.csv (sinh ra bởi prepare_data.py)
 ├── src/
 │   ├── preprocessing/
 │   │   ├── dictionaries.py       # Từ điển teencode, viết tắt, emoji, icon, đồng nghĩa
 │   │   ├── text_cleaner.py       # TextCleaner: 11 bước làm sạch văn bản
 │   │   ├── word_segmenter.py     # Tách từ tiếng Việt (pyvi)
-│   │   └── metadata_processor.py # Chuẩn hoá rating/lượt thích/chất lượng
+│   │   └── metadata_processor.py # Chuẩn hoá rating / chất lượng sản phẩm
 │   ├── augmentation/
 │   │   └── eda_augmenter.py      # EDA augmentation (cân bằng lớp thiểu số)
 │   ├── dataset.py                # PyTorch Dataset + dynamic padding collate_fn
@@ -63,18 +68,20 @@ Metadata → Tiền xử lý → Per-Field Embedding ─────────
 │   ├── predict.py                # Suy luận (CLI + class SentimentPredictor) + gate_score
 │   └── utils.py
 ├── scripts/
-│   ├── convert_excel_to_csv.py   # Chuyển đổi file Excel gốc sang CSV
+│   ├── convert_excel_to_csv.py   # Chuyển đổi file Excel gốc sang CSV (DataCrawl.xlsx / update.xlsx)
+│   ├── generate_report.py        # Sinh bộ biểu đồ, ma trận nhầm lẫn và bảng tổng hợp ảnh
+│   ├── generate_docx_report.py   # Tự động xuất báo cáo học thuật chuẩn format Word (.docx)
 │   ├── prepare_data.py           # Pipeline chuẩn bị dữ liệu đầy đủ (17 bước tiền xử lý)
 │   ├── run_train.bat             # Windows: chạy trọn pipeline 1 lệnh
 │   └── run_train.sh              # Linux/Mac: chạy trọn pipeline 1 lệnh
 ├── api/
 │   ├── app.py                    # FastAPI microservice (/predict, /predict/batch, /health)
 │   ├── schemas.py                # Pydantic schemas (có gate_score)
-│   └── index.html                # Giao diện web demo
+│   └── index.html                # Giao diện web demo (2 trường metadata)
 ├── tests/
 │   └── test_preprocessing.py     # 25 unit test (không cần GPU/PhoBERT)
 └── outputs/
-    ├── checkpoints/              # best_model.pt, last_model.pt
+    ├── checkpoints/              # best_model.pt, last_model.pt (loại trừ trên Git)
     ├── logs/                     # log huấn luyện
     └── reports/                  # confusion_matrix.png, training_curves.png, metrics JSON
 ```
@@ -112,16 +119,18 @@ pytest tests/ -v
 
 ### 3.0. Chuyển đổi file Excel (nếu cần)
 
-Nếu bạn có file `update.xlsx` (dữ liệu gốc 15,378 dòng):
+Project hỗ trợ chuyển đổi từ file Excel `DataCrawl.xlsx` (56,878+ dòng) hoặc `update.xlsx`:
 
 ```bash
-python -m scripts.convert_excel_to_csv
+# Mặc định tự động tìm và đọc file DataCrawl.xlsx (hoặc chỉ định đường dẫn)
+python -m scripts.convert_excel_to_csv --input ../DataCrawl.xlsx
 ```
 
 Script tự động:
-- Đọc file Excel và mapping cột (Cmt → comment, Phan loai → label, rating, ...)
+- Đọc file Excel, tự động nhận diện sheet dữ liệu (`Du lieu train`)
+- Mapping cột (Cmt → comment, Phan loai → label, rating, Chất lượng sản phẩm → quality)
 - Chuẩn hoá nhãn (Negative → negative, Normal → normal, Positive → positive)
-- Loại bỏ dòng rỗng
+- Lọc bỏ dòng comment rỗng hoặc text 'None', loại bỏ hoàn toàn bình luận trùng lặp
 - Lưu ra `data/raw/comments.csv`
 
 ### 3.1. Định dạng file CSV đầu vào
@@ -133,13 +142,10 @@ File `data/raw/comments.csv` với các cột:
 | `comment`             | ✅       | Nội dung bình luận (văn bản thô, chưa xử lý)  |
 | `label`                | ✅       | `negative` \| `normal` \| `positive`          |
 | `rating`               | khuyến nghị | Số sao đánh giá (1–5)                     |
-| `num_likes`            | khuyến nghị | Số lượt thích bình luận                   |
 | `quality`              | khuyến nghị | Điểm chất lượng sản phẩm (1–5)            |
 
-Thiếu cột metadata vẫn chạy được — `MetadataProcessor` tự động điền giá trị
-mặc định học được từ tập train (xem `src/preprocessing/metadata_processor.py`).
-Muốn thêm trường metadata khác (vd `num_replies`, `is_edited`...), khai báo
-thêm trong `METADATA_SCHEMA` ở `config.py`.
+> **Ghi chú về `num_likes`**: Trong phiên bản tối ưu hóa mới nhất, trường `num_likes` đã được loại bỏ khỏi `METADATA_SCHEMA` để tránh gây nhiễu và làm mất cân bằng gate score. Hệ thống tập trung tối ưu vào 2 thuộc tính cốt lõi: `rating` và `quality`.
+
 
 ### 3.2. Chạy pipeline chuẩn bị dữ liệu
 
@@ -279,7 +285,7 @@ Xem tài liệu API tự động tại `http://localhost:8000/docs`.
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"text": "Giao hàng nhanh, sản phẩm tốt!", "rating": 5, "num_likes": 10, "quality": 5}'
+  -d '{"text": "Giao hàng nhanh, sản phẩm tốt!", "rating": 5, "quality": 5}'
 ```
 
 Response mẫu:
@@ -289,7 +295,7 @@ Response mẫu:
   "label": "positive",
   "confidence": 0.96,
   "probabilities": {"negative": 0.01, "normal": 0.03, "positive": 0.96},
-  "gate_score": 0.42
+  "gate_score": 0.28
 }
 ```
 
@@ -302,11 +308,12 @@ public class SentimentClient
     private readonly HttpClient _http;
     public SentimentClient(HttpClient http) => _http = http; // base URL: http://localhost:8000
 
-    public async Task<SentimentResult> PredictAsync(string text, double? rating = null, int? numLikes = null)
+    public async Task<SentimentResult> PredictAsync(string text, double? rating = null, double? quality = null)
     {
-        var payload = new { text, rating, num_likes = numLikes };
+        var payload = new { text, rating, quality };
         var response = await _http.PostAsJsonAsync("/predict", payload);
         response.EnsureSuccessStatusCode();
+
         return await response.Content.ReadFromJsonAsync<SentimentResult>();
     }
 }
@@ -331,58 +338,67 @@ padding) → **vector 512 chiều**.
 
 ### Nhánh metadata — Per-Field Embedding
 
-Mỗi trường metadata (rating, num_likes, quality) có **riêng** 1 embedding
-layer: `Linear(1 → 32) + ReLU + Dropout`. Sau đó concat tất cả →
-**vector 96 chiều** (3 × 32).
+Mỗi trường metadata (`rating`, `quality`) có **riêng** 1 embedding
+layer: `Linear(1 → 32) + ReLU + Dropout`. Sau đó concat lại →
+**vector 64 chiều** (2 × 32). Trường `num_likes` đã được loại bỏ để tập trung
+vào các đặc trưng có tính phân loại cao và không gây nhiễu.
 
-Lợi ích so với Dense chung: model học biểu diễn **riêng biệt** cho từng
-trường. "Rating cao" và "nhiều lượt thích" được encode độc lập trước khi
-kết hợp, không bị trộn lẫn ngay từ đầu.
+Lợi ích: model học biểu diễn độc lập cho từng trường metadata trước khi kết hợp với văn bản.
 
 ### Adaptive Metadata Gate — Cơ chế trọng tâm
 
-Gate quyết định **mức độ sử dụng metadata** cho **từng sample** (không phải
-toàn cục):
+Gate quyết định **mức độ sử dụng metadata** cho **từng sample**:
 
 ```
-gate_input = concat(text_vector, metadata_vector)     # (batch, 608)
+gate_input = concat(text_vector, metadata_vector)     # (batch, 576)
 gate_score = σ(W₂ · ReLU(W₁ · gate_input + b₁) + b₂)  # scalar ∈ (0,1)
-gated_metadata = gate_score × metadata_vector           # (batch, 96)
+gated_metadata = gate_score × metadata_vector           # (batch, 64)
 ```
 
 - **gate ≈ 0**: text đã rõ ràng (vd "sản phẩm rất tệ") → bỏ qua metadata
-- **gate ≈ 1**: text mơ hồ (vd "ok") → dùng metadata (rating=1 → negative)
+- **gate ≈ 1**: text mơ hồ (vd "ok", "dùng được") → dựa thêm metadata (rating, quality)
 
-Gate được học end-to-end cùng model, có L1 regularization (`λ=0.01`) để
-khuyến khích model tự quyết định không dùng metadata khi không cần.
+Gate được học end-to-end cùng model, có L1 regularization (`λ=0.015`) để
+khuyến khích model tự quyết định không phụ thuộc metadata khi không cần.
 
 ### Fusion
 
-Concatenate(text_vector 512d + gated_metadata 96d = 608d) → **LayerNorm** →
-Linear(256) + ReLU → Dropout(0.3) → Linear(3) → **logits thô** (softmax
-áp dụng ở `CrossEntropyLoss` lúc train và tường minh lúc `predict_with_gate()`
-— không gọi 2 lần).
+Concatenate(text_vector 512d + gated_metadata 64d = 576d) → **LayerNorm** →
+Linear(256) + ReLU → Dropout(0.3) → Linear(3) → **logits thô**.
 
-Toàn bộ kích thước (số filter CNN, chiều embedding metadata, chiều FC,
-gate hidden dim, dropout...) khai báo tại `ModelConfig` trong `config.py`.
+Toàn bộ kích thước khai báo tập trung tại `ModelConfig` trong `config.py`.
 
 ---
 
-## 8. Dữ liệu
+## 8. Dữ liệu & Kết quả thực nghiệm
 
-Dataset gồm **15,378 bình luận** tiếng Việt từ nhiều nguồn thương mại điện tử
-(Shopee, Lazada, Tiki, ...) đã được gán nhãn:
+### 8.1. Phân bố tập dữ liệu (56,878 bình luận)
 
 | Nhãn | Số lượng | Tỷ lệ |
 |------|----------|--------|
-| Positive | 6,305 | 41.0% |
-| Normal | 5,175 | 33.7% |
-| Negative | 3,898 | 25.3% |
+| Positive (Tích cực) | 22,616 | 39.8% |
+| Normal (Bình thường) | 19,175 | 33.7% |
+| Negative (Tiêu cực) | 15,087 | 26.5% |
+| **Tổng cộng** | **56,878** | **100.0%** |
 
-Sau khi chia tập và augmentation (cân bằng lớp thiểu số):
-- **Train**: 13,239 dòng (4,413 mỗi lớp — cân bằng hoàn toàn)
-- **Val**: 2,306 dòng
-- **Test**: 2,308 dòng
+### 8.2. Kết quả kiểm thử trên Test Set (8,533 mẫu)
+
+Đánh giá thực nghiệm chi tiết sau khi huấn luyện (xem thêm tại `outputs/reports/`):
+
+| Chỉ số | Giá trị |
+|---|---|
+| **Accuracy (Độ chính xác toàn cục)** | **90.80%** |
+| **Macro F1-Score** | **91.54%** |
+| **Weighted F1-Score** | **90.80%** |
+
+**Chi tiết theo từng lớp (Per-class Metrics):**
+
+| Lớp | Precision | Recall | F1-Score | Số mẫu test (Support) |
+|---|---|---|---|---|
+| **Negative (Tiêu cực)** | **99.12%** | **99.56%** | **99.34%** | 2,263 |
+| **Normal (Bình thường)** | 86.02% | 87.45% | 86.73% | 2,877 |
+| **Positive (Tích cực)** | 89.33% | 87.80% | 88.56% | 3,393 |
+
 
 ---
 

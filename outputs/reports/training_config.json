@@ -10,7 +10,7 @@
       5
     ],
     "cnn_num_filters": 128,
-    "metadata_dim": 3,
+    "metadata_dim": 2,
     "per_field_embed_dim": 32,
     "gate_hidden_dim": 128,
     "gate_dropout": 0.2,
@@ -37,7 +37,7 @@
     "eval_batch_size": 16,
     "gradient_accumulation_steps": 4,
     "lr_phobert": 2e-05,
-    "lr_head": 0.001,
+    "lr_head": 0.0002,
     "weight_decay": 0.01,
     "warmup_ratio": 0.1,
     "max_grad_norm": 1.0,
@@ -51,23 +51,23 @@
     "metadata_dropout": 0.3
   },
   "dataset_stats": {
-    "train_samples": 13239,
-    "val_samples": 2306,
+    "train_samples": 47493,
+    "val_samples": 8531,
     "train_label_dist": {
-      "negative": 4413,
-      "normal": 4413,
-      "positive": 4413
+      "negative": 15831,
+      "positive": 15831,
+      "normal": 15831
     },
     "val_label_dist": {
-      "positive": 946,
-      "normal": 776,
-      "negative": 584
+      "positive": 3392,
+      "normal": 2876,
+      "negative": 2263
     }
   },
-  "total_params": 136612228,
-  "trainable_params": 136612228,
-  "best_epoch": 17,
-  "best_val_macro_f1": 0.9957183068878476,
-  "final_avg_gate_score": 0.11896360787625705,
+  "total_params": 136599812,
+  "trainable_params": 136599812,
+  "best_epoch": 7,
+  "best_val_macro_f1": 0.9150701841671625,
+  "final_avg_gate_score": 1.8149591116244268e-07,
   "device": "cuda"
 }
