@@ -4,7 +4,8 @@ Hệ thống AI phân loại bình luận thương mại điện tử tiếng Vi
 **negative (tiêu cực) / normal (bình thường) / positive (tích cực)**, sử dụng
 kiến trúc **PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)** — kết hợp ngữ
 nghĩa văn bản (PhoBERT + Multi-Kernel CNN) với thông tin metadata đi kèm
-bình luận (rating, chất lượng sản phẩm) thông qua cơ chế
+bình luận (độ dài bình luận, số từ, có ảnh
+hay không — *đã loại bỏ `rating` và `quality` để ngăn ngừa Target Leakage & học vẹt*) thông qua cơ chế
 **Adaptive Metadata Gate** tự động quyết định mức độ sử dụng metadata.
 
 ## Kiến trúc mô hình đề xuất
@@ -19,12 +20,12 @@ Văn bản → Tiền xử lý → Word Segmentation → PhoBERT Tokenizer → P
                                                           │   Gate ───────┤
                                                           │  (σ ∈ 0~1)   │
 Metadata → Tiền xử lý → Per-Field Embedding ─────────────┘               │
-  (rating→32d, quality→32d = 64d)                                         │
+  (comment_length→32d, word_count→32d, has_image→32d = 96d)                  │
                                                                           │
                      Gated Metadata (gate × meta_vec) ────────────────────┘
                                                                           │
                      Concatenate(text_vec, gated_meta) → LayerNorm (576d) │
-                     → FC(256) + ReLU → Dropout → Classifier → 3 lớp
+                     Concatenate(text_vec, gated_meta) → LayerNorm         │
 ```
 
 **Điểm khác biệt so với mô hình cũ (PhoBERT + CNN + Metadata):**
@@ -32,10 +33,10 @@ Metadata → Tiền xử lý → Per-Field Embedding ─────────
 | Thành phần | Mô hình cũ | PhoBERT-AMP (v2) |
 |---|---|---|
 | CNN | Conv1D → ReLU → MaxPool | Conv1D → **BatchNorm** → ReLU → MaxPool |
-| Metadata Embedding | Dense chung (3→64) | **Per-Field Embedding** (mỗi trường riêng 1→32, bỏ num_likes để giảm nhiễu) |
+| Metadata Embedding | Dense chung (3→64) | **Per-Field Embedding** (mỗi trường riêng 1→32, 3 trường: comment_length, word_count, has_image — *đã loại bỏ rating và quality để chống Target Leakage*) |
 | Fusion | Concat cứng | **Adaptive Metadata Gate** (học trọng số ∈ 0-1) |
 | Normalization | Không có | **LayerNorm** trước FC |
-| Kích thước fusion | 576 (512+64) | **576** (512 + 64) |
+| Kích thước fusion | 576 (512+64) | **544** (512 + 32) |
 
 
 ---
@@ -58,7 +59,7 @@ Metadata → Tiền xử lý → Per-Field Embedding ─────────
 │   │   ├── dictionaries.py       # Từ điển teencode, viết tắt, emoji, icon, đồng nghĩa
 │   │   ├── text_cleaner.py       # TextCleaner: 11 bước làm sạch văn bản
 │   │   ├── word_segmenter.py     # Tách từ tiếng Việt (pyvi)
-│   │   └── metadata_processor.py # Chuẩn hoá rating / chất lượng sản phẩm
+│   │   └── metadata_processor.py # Chuẩn hoá metadata (rating, quality, comment_length, word_count, has_image)
 │   ├── augmentation/
 │   │   └── eda_augmenter.py      # EDA augmentation (cân bằng lớp thiểu số)
 │   ├── dataset.py                # PyTorch Dataset + dynamic padding collate_fn
@@ -77,7 +78,7 @@ Metadata → Tiền xử lý → Per-Field Embedding ─────────
 ├── api/
 │   ├── app.py                    # FastAPI microservice (/predict, /predict/batch, /health)
 │   ├── schemas.py                # Pydantic schemas (có gate_score)
-│   └── index.html                # Giao diện web demo (2 trường metadata)
+│   └── index.html                # Giao diện web demo (5 trường metadata)
 ├── tests/
 │   └── test_preprocessing.py     # 25 unit test (không cần GPU/PhoBERT)
 └── outputs/
@@ -128,7 +129,8 @@ python -m scripts.convert_excel_to_csv --input ../DataCrawl.xlsx
 
 Script tự động:
 - Đọc file Excel, tự động nhận diện sheet dữ liệu (`Du lieu train`)
-- Mapping cột (Cmt → comment, Phan loai → label, rating, Chất lượng sản phẩm → quality)
+- Mapping cột (Cmt → comment, Phan loai → label, rating, Chất lượng sản phẩm → quality, Hình ảnh → has_image)
+- Tự động tính `comment_length` (số ký tự) và `word_count` (số từ) từ bình luận
 - Chuẩn hoá nhãn (Negative → negative, Normal → normal, Positive → positive)
 - Lọc bỏ dòng comment rỗng hoặc text 'None', loại bỏ hoàn toàn bình luận trùng lặp
 - Lưu ra `data/raw/comments.csv`
@@ -141,10 +143,13 @@ File `data/raw/comments.csv` với các cột:
 |-----------------------|:--------:|-----------------------------------------------|
 | `comment`             | ✅       | Nội dung bình luận (văn bản thô, chưa xử lý)  |
 | `label`                | ✅       | `negative` \| `normal` \| `positive`          |
-| `rating`               | khuyến nghị | Số sao đánh giá (1–5)                     |
-| `quality`              | khuyến nghị | Điểm chất lượng sản phẩm (1–5)            |
+| `rating`               | Đã bỏ    | Đã loại khỏi mô hình để ngăn Target Leakage (tránh học vẹt từ rating vốn là proxy của ground truth label) |
+| `quality`              | Đã bỏ    | Đã loại khỏi mô hình để tránh học vẹt do tương quan quá cao với nhãn |
+| `comment_length`       | tự tính   | Độ dài bình luận (số ký tự) — tự tính từ comment |
+| `word_count`           | tự tính   | Số từ trong bình luận — tự tính từ comment    |
+| `has_image`            | khuyến nghị | Bình luận có đính kèm ảnh (1=có, 0=không) |
 
-> **Ghi chú về `num_likes`**: Trong phiên bản tối ưu hóa mới nhất, trường `num_likes` đã được loại bỏ khỏi `METADATA_SCHEMA` để tránh gây nhiễu và làm mất cân bằng gate score. Hệ thống tập trung tối ưu vào 2 thuộc tính cốt lõi: `rating` và `quality`.
+> **Ghi chú:** `comment_length` và `word_count` được tự động tính từ nội dung bình luận trong các script chuẩn bị dữ liệu và inference, không cần cung cấp sẵn trong file CSV.
 
 
 ### 3.2. Chạy pipeline chuẩn bị dữ liệu
@@ -252,7 +257,7 @@ from src.predict import SentimentPredictor
 predictor = SentimentPredictor()  # tự nạp best_model.pt + tokenizer + scaler
 result = predictor.predict(
     "Giao hàng nhanh, đóng gói cẩn thận, sản phẩm dùng rất tốt!",
-    metadata={"rating": 5, "num_likes": 12, "quality": 5.0},
+    metadata={"has_image": 0},
 )
 print(result["label"], result["confidence"])
 print(f"Gate Score: {result['gate_score']:.3f}")  # mức độ dùng metadata
@@ -265,12 +270,12 @@ tránh lệch phân phối dữ liệu (train-serve skew).
 
 **Gate Score** cho biết mức độ mô hình sử dụng metadata cho bình luận đó:
 - `gate_score ≈ 0`: model chỉ dựa vào text (văn bản đã đủ rõ ràng)
-- `gate_score ≈ 1`: model dùng đầy đủ metadata (text mơ hồ, cần rating/likes)
+- `gate_score ≈ 1`: model dùng đầy đủ metadata (text mơ hồ, cần rating/quality/...)
 
 ### Dùng qua CLI
 
 ```bash
-python -m src.predict --text "Sản phẩm tệ, không đáng tiền" --rating 1
+python -m src.predict --text "Sản phẩm tệ, không đáng tiền" --has_image 0
 python -m src.predict --input_csv data/raw/new_comments.csv --output_csv outputs/reports/predictions.csv
 ```
 
@@ -285,7 +290,7 @@ Xem tài liệu API tự động tại `http://localhost:8000/docs`.
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"text": "Giao hàng nhanh, sản phẩm tốt!", "rating": 5, "quality": 5}'
+  -d '{"text": "Giao hàng nhanh, sản phẩm tốt!", "has_image": 0}'
 ```
 
 Response mẫu:
@@ -308,9 +313,9 @@ public class SentimentClient
     private readonly HttpClient _http;
     public SentimentClient(HttpClient http) => _http = http; // base URL: http://localhost:8000
 
-    public async Task<SentimentResult> PredictAsync(string text, double? rating = null, double? quality = null)
+    public async Task<SentimentResult> PredictAsync(string text, double? rating = null, double? quality = null, int? hasImage = null)
     {
-        var payload = new { text, rating, quality };
+        var payload = new { text, rating, quality, has_image = hasImage };
         var response = await _http.PostAsJsonAsync("/predict", payload);
         response.EnsureSuccessStatusCode();
 
@@ -338,10 +343,11 @@ padding) → **vector 512 chiều**.
 
 ### Nhánh metadata — Per-Field Embedding
 
-Mỗi trường metadata (`rating`, `quality`) có **riêng** 1 embedding
-layer: `Linear(1 → 32) + ReLU + Dropout`. Sau đó concat lại →
-**vector 64 chiều** (2 × 32). Trường `num_likes` đã được loại bỏ để tập trung
-vào các đặc trưng có tính phân loại cao và không gây nhiễu.
+Mỗi trường metadata (`rating`, `quality`, `comment_length`, `word_count`,
+`has_image`) có **riêng** 1 embedding layer: `Linear(1 → 32) + ReLU + Dropout`.
+Sau đó concat lại → **vector 160 chiều** (5 × 32). `comment_length` và
+`word_count` dùng kiểu `numeric_log` (log1p trước khi scale) vì phân phối
+lệch phải. `has_image` là kiểu `binary` (0/1, không scale).
 
 Lợi ích: model học biểu diễn độc lập cho từng trường metadata trước khi kết hợp với văn bản.
 
@@ -352,18 +358,18 @@ Gate quyết định **mức độ sử dụng metadata** cho **từng sample**:
 ```
 gate_input = concat(text_vector, metadata_vector)     # (batch, 576)
 gate_score = σ(W₂ · ReLU(W₁ · gate_input + b₁) + b₂)  # scalar ∈ (0,1)
-gated_metadata = gate_score × metadata_vector           # (batch, 64)
+gated_metadata = gate_score × metadata_vector           # (batch, 160)
 ```
 
 - **gate ≈ 0**: text đã rõ ràng (vd "sản phẩm rất tệ") → bỏ qua metadata
-- **gate ≈ 1**: text mơ hồ (vd "ok", "dùng được") → dựa thêm metadata (rating, quality)
+- **gate ≈ 1**: text mơ hồ (vd "ok", "dùng được") → dựa thêm metadata (rating, quality, ...)
 
 Gate được học end-to-end cùng model, có L1 regularization (`λ=0.015`) để
 khuyến khích model tự quyết định không phụ thuộc metadata khi không cần.
 
 ### Fusion
 
-Concatenate(text_vector 512d + gated_metadata 64d = 576d) → **LayerNorm** →
+Concatenate(text_vector 512d + gated_metadata 32d = 544d) → **LayerNorm** →
 Linear(256) + ReLU → Dropout(0.3) → Linear(3) → **logits thô**.
 
 Toàn bộ kích thước khai báo tập trung tại `ModelConfig` trong `config.py`.

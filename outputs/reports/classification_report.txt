@@ -2,19 +2,19 @@
   CLASSIFICATION REPORT - PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)
 ============================================================
 
-Accuracy       : 0.9080
-Macro F1       : 0.9154
-Macro Precision: 0.9149
-Macro Recall   : 0.9160
-Weighted F1    : 0.9080
+Accuracy       : 0.9137
+Macro F1       : 0.9208
+Macro Precision: 0.9207
+Macro Recall   : 0.9216
+Weighted F1    : 0.9139
 
               precision    recall  f1-score   support
 
-    negative       0.99      1.00      0.99      2263
-      normal       0.86      0.87      0.87      2877
-    positive       0.89      0.88      0.89      3393
+    negative       0.99      0.99      0.99      2263
+      normal       0.86      0.90      0.88      2877
+    positive       0.91      0.87      0.89      3393
 
     accuracy                           0.91      8533
-   macro avg       0.91      0.92      0.92      8533
+   macro avg       0.92      0.92      0.92      8533
 weighted avg       0.91      0.91      0.91      8533
 

@@ -91,7 +91,12 @@ def predict(item: CommentInput):
     if predictor is None:
         raise HTTPException(status_code=503, detail="Mô hình chưa sẵn sàng")
 
-    metadata = item.model_dump(exclude={"text"}, exclude_none=True)
+    metadata = item.model_dump(exclude={"text", "rating", "quality"}, exclude_none=True)
+    # Tu dong tinh comment_length va word_count tu text neu chua truyen
+    if "comment_length" not in metadata:
+        metadata["comment_length"] = len(item.text)
+    if "word_count" not in metadata:
+        metadata["word_count"] = len(item.text.split())
     result = predictor.predict(item.text, metadata)
     return PredictionResult(
         text=result["text"],
@@ -99,6 +104,7 @@ def predict(item: CommentInput):
         confidence=result["confidence"],
         probabilities=result["probabilities"],
         gate_score=result.get("gate_score"),
+        attention_weights=result.get("attention_weights"),
     )
 
 
@@ -110,7 +116,13 @@ def predict_batch(payload: BatchCommentInput):
         raise HTTPException(status_code=400, detail="Danh sách 'comments' rỗng")
 
     texts = [c.text for c in payload.comments]
-    metadata_list = [c.model_dump(exclude={"text"}, exclude_none=True) for c in payload.comments]
+    metadata_list = [c.model_dump(exclude={"text", "rating", "quality"}, exclude_none=True) for c in payload.comments]
+    # Tu dong tinh comment_length va word_count cho tung binh luan neu chua truyen
+    for text, meta in zip(texts, metadata_list):
+        if "comment_length" not in meta:
+            meta["comment_length"] = len(text)
+        if "word_count" not in meta:
+            meta["word_count"] = len(text.split())
 
     results = predictor.predict_batch(texts, metadata_list)
     return BatchPredictionResult(
@@ -121,6 +133,7 @@ def predict_batch(payload: BatchCommentInput):
                 confidence=r["confidence"],
                 probabilities=r["probabilities"],
                 gate_score=r.get("gate_score"),
+                attention_weights=r.get("attention_weights"),
             )
             for r in results
         ]

@@ -1,5 +1,5 @@
 {
-  "model_architecture": "PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)",
+  "model_architecture": "PhoBERT-AMP v2 (Adaptive Metadata-aware PhoBERT + Cross-Attention)",
   "model_config": {
     "phobert_model_name": "vinai/phobert-base",
     "num_classes": 3,
@@ -10,15 +10,18 @@
       5
     ],
     "cnn_num_filters": 128,
-    "metadata_dim": 2,
+    "metadata_dim": 3,
     "per_field_embed_dim": 32,
+    "cross_attention_dim": 32,
+    "cross_attention_dropout": 0.25,
     "gate_hidden_dim": 128,
     "gate_dropout": 0.2,
     "fc_hidden_dim": 256,
     "dropout": 0.3,
     "freeze_phobert": false,
-    "gate_max_val": 0.5,
-    "metadata_dropout": 0.3
+    "gate_max_val": 0.45,
+    "metadata_dropout": 0.4,
+    "use_aux_classifier": true
   },
   "train_args": {
     "train_path": "c:\\DevLTDD\\Đồ án tốt nghiệp\\model_phobert_metadata_cnn\\phobert_cnn_metadata_sentiment\\data\\processed\\train.csv",
@@ -46,9 +49,11 @@
     "num_workers": 0,
     "no_class_weights": false,
     "no_amp": false,
-    "gate_reg_lambda": 0.015,
-    "gate_max_val": 0.5,
-    "metadata_dropout": 0.3
+    "gate_reg_lambda": 0.01,
+    "gate_target": 0.3,
+    "aux_loss_weight": 0.6,
+    "gate_max_val": 0.45,
+    "metadata_dropout": 0.4
   },
   "dataset_stats": {
     "train_samples": 47493,
@@ -64,10 +69,10 @@
       "negative": 2263
     }
   },
-  "total_params": 136599812,
-  "trainable_params": 136599812,
-  "best_epoch": 7,
-  "best_val_macro_f1": 0.9150701841671625,
-  "final_avg_gate_score": 1.8149591116244268e-07,
+  "total_params": 136607655,
+  "trainable_params": 136607655,
+  "best_epoch": 4,
+  "best_val_macro_f1": 0.9173536025954526,
+  "final_avg_gate_score": 0.3002662892426252,
   "device": "cuda"
 }

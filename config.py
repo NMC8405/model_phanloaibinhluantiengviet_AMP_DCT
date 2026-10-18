@@ -46,13 +46,14 @@ LABEL_LIST = ["negative", "normal", "positive"]  # tiêu cực, bình thường,
 LABEL2ID: Dict[str, int] = {label: idx for idx, label in enumerate(LABEL_LIST)}
 ID2LABEL: Dict[int, str] = {idx: label for idx, label in enumerate(LABEL_LIST)}
 
-# Metadata đi kèm mỗi bình luận: rating, chất lượng sản phẩm
-# (num_likes đã được loại bỏ theo yêu cầu để tránh nhiễu và không ảnh hưởng mô hình)
-# type: "numeric" (co scale) hoac "binary" (0/1, khong can scale)
+# Metadata đi kèm mỗi bình luận (ĐÃ LOẠI BỎ 'rating' và 'quality' để tránh Target Leakage / Shortcut Learning)
+# type: "numeric" (co scale), "numeric_log" (log1p + scale), "binary" (0/1, khong scale)
 METADATA_SCHEMA: Dict[str, str] = {
-    "rating": "numeric",             # so sao danh gia 1-5
-    # "num_likes": "numeric_log",    # da bo luot thich
-    "quality": "numeric",            # diem chat luong san pham 1-5 (tu cot 'Chat luong san pham')
+    # "rating": "numeric",           # ĐÃ BỎ: Rating dùng để sinh nhãn ground truth -> đưa vào input sẽ gây Target Leakage
+    # "quality": "numeric",          # ĐÃ BỎ: Điểm chất lượng cũng tương quan trực tiếp với nhãn -> gây học vẹt
+    "comment_length": "numeric_log", # do dai binh luan (so ky tu) - phan phoi lech nen dung log
+    "word_count": "numeric_log",     # so tu trong binh luan - phan phoi lech nen dung log
+    "has_image": "binary",           # binh luan co dinh kem anh hay khong (1=co, 0=khong)
 }
 METADATA_COLUMNS: List[str] = list(METADATA_SCHEMA.keys())
 METADATA_DIM: int = len(METADATA_COLUMNS)
@@ -71,18 +72,23 @@ class ModelConfig:
     cnn_num_filters: int = 128  # So filter moi kernel size
 
     # Nhanh metadata - Per-Field Embedding
-    metadata_dim: int = METADATA_DIM           # so truong metadata (2: rating, quality)
+    metadata_dim: int = METADATA_DIM           # so truong metadata (3: comment_length, word_count, has_image)
     per_field_embed_dim: int = 32              # moi truong metadata embed thanh 32-dim
     
     @property
     def metadata_embed_dim(self) -> int:
         return self.metadata_dim * self.per_field_embed_dim
 
+    # Cross-Attention (MOI): Text x Metadata
+    cross_attention_dim: int = 32              # d_k = d_v cho Cross-Attention
+    cross_attention_dropout: float = 0.25       # dropout tren attention weights
+
     # Adaptive Metadata Gate
     gate_hidden_dim: int = 128                 # hidden dim cua gate MLP
     gate_dropout: float = 0.2                  # dropout trong gate MLP
-    gate_max_val: float = 0.5                  # Hard cap cho gate_score, ep model luon dung it nhat 50% text
-    metadata_dropout: float = 0.3              # Ti le dropout metadata de buoc model phai hoc text khi train
+    gate_max_val: float = 0.45                 # Hard cap: metadata chi duoc dong gop toi da 45%, van ban luon >= 55%
+    metadata_dropout: float = 0.40             # Dropout 40% metadata khi training - ep model hoc ngu nghia van ban
+    use_aux_classifier: bool = True            # Bat classifier phu tren text de chong hoc vet metadata
 
     # Fusion head
     fc_hidden_dim: int = 256  # Tang tu 128 len 256 cho du lieu lon hon
@@ -114,9 +120,10 @@ class TrainConfig:
     warmup_ratio: float = 0.1     # Tang tu 0.06 len 0.1 cho du lieu lon hon
     max_grad_norm: float = 1.0
 
-    # Adaptive Metadata Gate regularization
-    gate_reg_lambda: float = 0.015  # L1 penalty tren gate score - gia tri thiet ke chuan
-                                    # giup gate dao dong can bang (0.15 - 0.35) tren tap 56k
+    # Adaptive Metadata Gate regularization & Anti-shortcut
+    gate_reg_lambda: float = 0.01   # Phat MSE keo gate ve gate_target (du manh de ngan gate bao hoa)
+    gate_target: float = 0.30      # Nguong gate muc tieu (~0.30, metadata chi ho tro phu)
+    aux_loss_weight: float = 0.6   # Trong so loss phu tren van ban - ep PhoBERT+CNN tu phan loai dung cam xuc
 
     use_class_weights: bool = True
     use_amp: bool = True          # mixed precision - quan trong voi GPU 8GB (RTX 4060)

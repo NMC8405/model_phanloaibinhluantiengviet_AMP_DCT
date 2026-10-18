@@ -116,18 +116,17 @@ class AverageMeter:
 
 
 def load_tokenizer(model_name: str) -> Any:
-    """Tải AutoTokenizer với cơ chế fallback sang cache local nếu mất kết nối mạng."""
+    """Tải AutoTokenizer ưu tiên cache local để không bị delay/timeout mạng."""
     from transformers import AutoTokenizer
     try:
-        # Thử tải thông thường từ HuggingFace Hub (có kiểm tra update)
-        return AutoTokenizer.from_pretrained(model_name)
-    except Exception as e:
-        # Nếu gặp lỗi mạng (timeout, WinError 10054, block...), tải trực tiếp từ cache local
+        # Thử tải trực tiếp từ cache local trước để phản hồi tức thì
+        return AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+    except Exception:
+        # Nếu chưa có trong cache thì mới tải từ HuggingFace Hub
         try:
-            return AutoTokenizer.from_pretrained(model_name, local_files_only=True)
-        except Exception as e_local:
+            return AutoTokenizer.from_pretrained(model_name)
+        except Exception as e:
             raise RuntimeError(
-                f"Không thể tải tokenizer '{model_name}' từ HuggingFace Hub lẫn bộ nhớ đệm local cache.\n"
-                f"Lỗi mạng: {e}\nLỗi local cache: {e_local}"
+                f"Không thể tải tokenizer '{model_name}' từ HuggingFace Hub lẫn local cache: {e}"
             ) from e
 

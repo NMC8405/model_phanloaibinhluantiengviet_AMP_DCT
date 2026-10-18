@@ -106,6 +106,8 @@ def augment_minority_classes(df, text_column, label_column, target_ratio, seed, 
             variant_text = augmenter.augment(src_row[text_column], num_aug=1)[0]
             new_row = src_row.copy()
             new_row[text_column] = variant_text
+            if "raw_text" in new_row:
+                new_row["raw_text"] = variant_text
             new_rows.append(new_row)
 
     if not new_rows:
@@ -229,6 +231,16 @@ def main():
     def finalize(split_df: pd.DataFrame) -> pd.DataFrame:
         out = split_df.copy()
         out[cfg.TEXT_COLUMN] = out["segmented_text"]  # cột chính, sẵn sàng cho tokenizer
+        # Tinh lai comment_length va word_count tu raw_text (vi augmentation co the tao text moi)
+        if "raw_text" in out.columns:
+            out["comment_length"] = out["raw_text"].fillna("").str.len().astype(int)
+            out["word_count"] = out["raw_text"].fillna("").str.split().str.len().fillna(0).astype(int)
+        else:
+            out["comment_length"] = out[cfg.TEXT_COLUMN].fillna("").str.len().astype(int)
+            out["word_count"] = out[cfg.TEXT_COLUMN].fillna("").str.split().str.len().fillna(0).astype(int)
+        # Dam bao has_image ton tai (mac dinh 0 neu khong co trong du lieu goc)
+        if "has_image" not in out.columns:
+            out["has_image"] = 0
         ordered_cols = (
             [cfg.TEXT_COLUMN, args.label_column]
             + [c for c in cfg.METADATA_COLUMNS if c in out.columns]

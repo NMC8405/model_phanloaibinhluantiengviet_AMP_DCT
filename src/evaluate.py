@@ -157,7 +157,7 @@ def load_model_for_inference(checkpoint_path: str, device):
     ca `phobert_model_name` - dung de tai dung tokenizer tuong ung."""
     ckpt = load_checkpoint(checkpoint_path, map_location=device)
     model = PhoBertAMP(**ckpt["model_config"]).to(device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.eval()
     return model, ckpt["model_config"]
 

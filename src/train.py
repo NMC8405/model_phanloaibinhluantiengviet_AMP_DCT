@@ -99,7 +99,11 @@ def parse_args():
     )
     p.add_argument("--no_amp", action="store_true", help="Tắt mixed precision (AMP)")
     p.add_argument("--gate_reg_lambda", type=float, default=cfg.TRAIN_CONFIG.gate_reg_lambda,
-                   help="Lambda cho L1 regularization trên gate score (0 = tắt)")
+                   help="Lambda cho regularization trên gate score (0 = tắt)")
+    p.add_argument("--gate_target", type=float, default=cfg.TRAIN_CONFIG.gate_target,
+                   help="Giá trị mục tiêu cho gate score (tránh gate sập về 0)")
+    p.add_argument("--aux_loss_weight", type=float, default=cfg.TRAIN_CONFIG.aux_loss_weight,
+                   help="Trọng số loss phụ trên text branch để chống học vẹt metadata (0 = tắt)")
     p.add_argument("--gate_max_val", type=float, default=cfg.MODEL_CONFIG.gate_max_val,
                    help="Giá trị lớn nhất có thể của gate score (hard cap)")
     p.add_argument("--metadata_dropout", type=float, default=cfg.MODEL_CONFIG.metadata_dropout,
@@ -153,35 +157,54 @@ def evaluate_loop(model, loader, criterion, device):
 
 def plot_training_history(history, save_path):
     epochs = [h["epoch"] for h in history]
-    fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
 
     # Loss
-    axes[0].plot(epochs, [h["train_loss"] for h in history], label="Train loss", marker="o")
-    axes[0].plot(epochs, [h["val_loss"] for h in history], label="Val loss", marker="o")
-    axes[0].set_xlabel("Epoch")
-    axes[0].set_ylabel("Loss")
-    axes[0].set_title("Loss theo epoch")
-    axes[0].legend()
-    axes[0].grid(alpha=0.3)
+    axes[0, 0].plot(epochs, [h["train_loss"] for h in history], label="Train loss", marker="o")
+    axes[0, 0].plot(epochs, [h["val_loss"] for h in history], label="Val loss", marker="o")
+    axes[0, 0].set_xlabel("Epoch")
+    axes[0, 0].set_ylabel("Loss")
+    axes[0, 0].set_title("Loss theo epoch")
+    axes[0, 0].legend()
+    axes[0, 0].grid(alpha=0.3)
 
     # Accuracy / F1
-    axes[1].plot(epochs, [h["val_accuracy"] for h in history], label="Val accuracy", marker="o")
-    axes[1].plot(epochs, [h["val_macro_f1"] for h in history], label="Val macro-F1", marker="o")
-    axes[1].set_xlabel("Epoch")
-    axes[1].set_ylabel("Score")
-    axes[1].set_title("Accuracy / Macro-F1 theo epoch")
-    axes[1].legend()
-    axes[1].grid(alpha=0.3)
+    axes[0, 1].plot(epochs, [h["val_accuracy"] for h in history], label="Val accuracy", marker="o")
+    axes[0, 1].plot(epochs, [h["val_macro_f1"] for h in history], label="Val macro-F1", marker="o")
+    axes[0, 1].set_xlabel("Epoch")
+    axes[0, 1].set_ylabel("Score")
+    axes[0, 1].set_title("Accuracy / Macro-F1 theo epoch")
+    axes[0, 1].legend()
+    axes[0, 1].grid(alpha=0.3)
 
     # Gate score
-    axes[2].plot(epochs, [h["avg_gate_score"] for h in history], label="Avg Gate Score",
+    axes[1, 0].plot(epochs, [h["avg_gate_score"] for h in history], label="Avg Gate Score",
                  marker="s", color="purple")
-    axes[2].set_xlabel("Epoch")
-    axes[2].set_ylabel("Gate Score")
-    axes[2].set_title("Mức độ sử dụng Metadata (Gate Score)")
-    axes[2].set_ylim(0, 1)
-    axes[2].legend()
-    axes[2].grid(alpha=0.3)
+    axes[1, 0].set_xlabel("Epoch")
+    axes[1, 0].set_ylabel("Gate Score")
+    axes[1, 0].set_title("Mức độ sử dụng Metadata (Gate Score)")
+    axes[1, 0].set_ylim(0, 1)
+    axes[1, 0].legend()
+    axes[1, 0].grid(alpha=0.3)
+
+    # Cross-Attention weights per metadata field
+    if history and "avg_attn_weights" in history[0]:
+        field_names = list(history[0]["avg_attn_weights"].keys())
+        colors = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"]
+        for idx, field in enumerate(field_names):
+            weights = [h["avg_attn_weights"][field] for h in history]
+            color = colors[idx % len(colors)]
+            axes[1, 1].plot(epochs, weights, label=f"Attn: {field}",
+                         marker="D", color=color)
+        axes[1, 1].set_xlabel("Epoch")
+        axes[1, 1].set_ylabel("Attention Weight")
+        axes[1, 1].set_title("Cross-Attention Weights theo epoch")
+        axes[1, 1].set_ylim(0, 1)
+        axes[1, 1].legend()
+        axes[1, 1].grid(alpha=0.3)
+    else:
+        axes[1, 1].text(0.5, 0.5, "No attention data", ha="center", va="center")
+        axes[1, 1].set_title("Cross-Attention Weights")
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -273,6 +296,8 @@ def main():
         cnn_num_filters=args.cnn_num_filters,
         metadata_dim=cfg.MODEL_CONFIG.metadata_dim,
         per_field_embed_dim=args.per_field_embed_dim,
+        cross_attention_dim=cfg.MODEL_CONFIG.cross_attention_dim,
+        cross_attention_dropout=cfg.MODEL_CONFIG.cross_attention_dropout,
         gate_hidden_dim=args.gate_hidden_dim,
         gate_dropout=args.gate_dropout,
         fc_hidden_dim=args.fc_hidden_dim,
@@ -280,16 +305,19 @@ def main():
         freeze_phobert=args.freeze_phobert,
         gate_max_val=args.gate_max_val,
         metadata_dropout=args.metadata_dropout,
+        use_aux_classifier=(args.aux_loss_weight > 0),
     )
     model = PhoBertAMP(**model_config).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Tổng tham số: {n_params:,} | Có thể huấn luyện: {n_trainable:,}")
-    logger.info(f"Kiến trúc: PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)")
+    logger.info(f"Kiến trúc: PhoBERT-AMP v2 (Adaptive Metadata-aware PhoBERT + Cross-Attention)")
     logger.info(f"  - Multi-Kernel CNN: filters={cfg.MODEL_CONFIG.cnn_filter_sizes}, num_filters={args.cnn_num_filters}")
     logger.info(f"  - Per-Field Embedding: {cfg.MODEL_CONFIG.metadata_dim} fields × {args.per_field_embed_dim}-dim = {cfg.MODEL_CONFIG.metadata_dim * args.per_field_embed_dim}-dim")
-    logger.info(f"  - Adaptive Gate: hidden={args.gate_hidden_dim}, dropout={args.gate_dropout}")
-    logger.info(f"  - Gate regularization: lambda={args.gate_reg_lambda}")
+    logger.info(f"  - Cross-Attention: d_k=d_v={cfg.MODEL_CONFIG.cross_attention_dim}, dropout={cfg.MODEL_CONFIG.cross_attention_dropout}")
+    logger.info(f"  - Adaptive Gate: hidden={args.gate_hidden_dim}, dropout={args.gate_dropout}, target={args.gate_target}")
+    logger.info(f"  - Gate regularization: lambda={args.gate_reg_lambda}, target={args.gate_target}")
+    logger.info(f"  - Anti-shortcut Aux loss: weight={args.aux_loss_weight}")
 
     # ------------------------------------------------------------------ Loss
     if not args.no_class_weights:
@@ -325,6 +353,8 @@ def main():
         model.train()
         train_loss_meter = AverageMeter()
         gate_score_meter = AverageMeter()
+        # Theo doi attention weights trung binh cho tung metadata field
+        attn_weight_meters = [AverageMeter() for _ in range(cfg.MODEL_CONFIG.metadata_dim)]
         optimizer.zero_grad()
 
         for step, batch in enumerate(train_loader):
@@ -334,20 +364,32 @@ def main():
             labels = batch["label"].to(device)
 
             with torch.amp.autocast(device_type=autocast_device, enabled=use_amp):
-                # Training mode -> forward tra ve (logits, gate_scores)
-                logits, gate_scores = model(input_ids, attention_mask, metadata)
+                # Training mode -> forward tra ve (logits, gate_scores, attention_weights)
+                logits, gate_scores, attn_weights = model(input_ids, attention_mask, metadata)
                 ce_loss = criterion(logits, labels)
 
-                # L1 regularization tren gate score: khuyen khich model
-                # dung it metadata khi text da du ro rang
-                gate_reg = args.gate_reg_lambda * gate_scores.mean()
-                loss = ce_loss + gate_reg
+                # Aux loss tren van ban: bat buoc PhoBERT+CNN tu hoc ngu nghia, chong hoc vet metadata
+                if getattr(model, "last_aux_logits", None) is not None and args.aux_loss_weight > 0:
+                    aux_loss = criterion(model.last_aux_logits, labels)
+                else:
+                    aux_loss = 0.0
+
+                # Bilateral MSE regularization tren gate score: giu gate on dinh quanh gate_target
+                if args.gate_reg_lambda > 0:
+                    gate_reg = args.gate_reg_lambda * torch.mean((gate_scores - args.gate_target) ** 2)
+                else:
+                    gate_reg = 0.0
+
+                loss = ce_loss + args.aux_loss_weight * aux_loss + gate_reg
 
                 loss_to_backward = loss / args.gradient_accumulation_steps
 
             scaler.scale(loss_to_backward).backward()
             train_loss_meter.update(ce_loss.item(), n=labels.size(0))
             gate_score_meter.update(gate_scores.mean().item(), n=labels.size(0))
+            # Cap nhat attention weights trung binh cho tung field
+            for fi in range(attn_weights.size(1)):
+                attn_weight_meters[fi].update(attn_weights[:, fi].mean().item(), n=labels.size(0))
 
             is_last_step_in_epoch = (step + 1) == len(train_loader)
             if (step + 1) % args.gradient_accumulation_steps == 0 or is_last_step_in_epoch:
@@ -366,11 +408,16 @@ def main():
                 )
 
         val_metrics = evaluate_loop(model, val_loader, criterion, device)
+        attn_weights_str = ", ".join(
+            f"{col}={attn_weight_meters[i].avg:.3f}"
+            for i, col in enumerate(cfg.METADATA_COLUMNS)
+        )
         logger.info(
             f"[Epoch {epoch}] train_loss={train_loss_meter.avg:.4f} | "
             f"val_loss={val_metrics['loss']:.4f} | val_acc={val_metrics['accuracy']:.4f} | "
             f"val_macro_f1={val_metrics['macro_f1']:.4f} | "
-            f"avg_gate={gate_score_meter.avg:.3f}"
+            f"avg_gate={gate_score_meter.avg:.3f} | "
+            f"attn_weights=[{attn_weights_str}]"
         )
 
         history.append(
@@ -384,6 +431,10 @@ def main():
                 "val_macro_recall": val_metrics["macro_recall"],
                 "val_weighted_f1": val_metrics["weighted_f1"],
                 "avg_gate_score": gate_score_meter.avg,
+                "avg_attn_weights": {
+                    col: attn_weight_meters[i].avg
+                    for i, col in enumerate(cfg.METADATA_COLUMNS)
+                },
             }
         )
 
@@ -411,7 +462,7 @@ def main():
 
     # Lưu training config (model config + hyperparams + dataset stats)
     training_config_info = {
-        "model_architecture": "PhoBERT-AMP (Adaptive Metadata-aware PhoBERT)",
+        "model_architecture": "PhoBERT-AMP v2 (Adaptive Metadata-aware PhoBERT + Cross-Attention)",
         "model_config": model_config,
         "train_args": {k: v for k, v in vars(args).items()},
         "dataset_stats": {

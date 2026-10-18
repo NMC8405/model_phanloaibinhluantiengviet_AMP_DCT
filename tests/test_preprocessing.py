@@ -113,48 +113,62 @@ class TestWordSegmenter:
 
 # ---------------------------------------------------------------------- MetadataProcessor
 class TestMetadataProcessor:
-    SCHEMA = {"rating": "numeric", "num_likes": "numeric_log", "verified_purchase": "binary"}
-    COLUMNS = ["rating", "num_likes", "verified_purchase"]
+    SCHEMA = {
+        "rating": "numeric",
+        "num_likes": "numeric_log",
+        "verified_purchase": "binary",
+        "comment_length": "numeric_log",
+        "word_count": "numeric_log",
+        "has_image": "binary",
+    }
+    COLUMNS = ["rating", "num_likes", "verified_purchase", "comment_length", "word_count", "has_image"]
+
+    def _make_df(self):
+        return pd.DataFrame({
+            "rating": [5, 4, 1, 3],
+            "num_likes": [10, 0, 100, 5],
+            "verified_purchase": [1, 0, 1, 1],
+            "comment_length": [50, 120, 30, 80],
+            "word_count": [10, 25, 6, 15],
+            "has_image": [1, 0, 0, 1],
+        })
 
     def test_fit_transform_shape(self):
-        df = pd.DataFrame(
-            {"rating": [5, 4, 1, 3], "num_likes": [10, 0, 100, 5], "verified_purchase": [1, 0, 1, 1]}
-        )
+        df = self._make_df()
         mp = MetadataProcessor(self.SCHEMA, self.COLUMNS)
         out = mp.fit_transform(df)
-        assert out.shape == (4, 3)
+        assert out.shape == (4, 6)
         assert out.dtype == np.float32
 
     def test_binary_column_not_scaled(self):
-        df = pd.DataFrame(
-            {"rating": [5, 4, 1, 3], "num_likes": [10, 0, 100, 5], "verified_purchase": [1, 0, 1, 0]}
-        )
+        df = self._make_df()
         mp = MetadataProcessor(self.SCHEMA, self.COLUMNS)
         out = mp.fit_transform(df)
-        # cot cuoi (verified_purchase) phai van la 0/1, khong bi StandardScaler bien doi
+        # cot verified_purchase (index 2) phai van la 0/1
         assert set(np.unique(out[:, 2]).tolist()) <= {0.0, 1.0}
+        # cot has_image (index 5) phai van la 0/1
+        assert set(np.unique(out[:, 5]).tolist()) <= {0.0, 1.0}
 
     def test_transform_before_fit_raises(self):
-        df = pd.DataFrame({"rating": [5], "num_likes": [1], "verified_purchase": [1]})
+        df = pd.DataFrame({
+            "rating": [5], "num_likes": [1], "verified_purchase": [1],
+            "comment_length": [20], "word_count": [4], "has_image": [0],
+        })
         mp = MetadataProcessor(self.SCHEMA, self.COLUMNS)
         with pytest.raises(RuntimeError):
             mp.transform(df)
 
     def test_missing_column_filled_with_learned_value(self):
-        train_df = pd.DataFrame(
-            {"rating": [5, 3, 1], "num_likes": [10, 5, 0], "verified_purchase": [1, 0, 1]}
-        )
+        train_df = self._make_df()
         mp = MetadataProcessor(self.SCHEMA, self.COLUMNS)
         mp.fit(train_df)
-        # luc inference nguoi dung KHONG truyen verified_purchase
-        single = mp.transform_single({"rating": 4, "num_likes": 2})
-        assert single.shape == (3,)
+        # luc inference nguoi dung KHONG truyen verified_purchase va has_image
+        single = mp.transform_single({"rating": 4, "num_likes": 2, "comment_length": 30, "word_count": 5})
+        assert single.shape == (6,)
         assert not np.isnan(single).any()
 
     def test_save_and_load_roundtrip(self, tmp_path):
-        df = pd.DataFrame(
-            {"rating": [5, 4, 1, 3], "num_likes": [10, 0, 100, 5], "verified_purchase": [1, 0, 1, 1]}
-        )
+        df = self._make_df()
         mp = MetadataProcessor(self.SCHEMA, self.COLUMNS)
         mp.fit(df)
         path = str(tmp_path / "scaler.joblib")

@@ -3,18 +3,21 @@
 predict.py
 ==========
 Suy luan (inference) tren binh luan MOI, CHUA qua xu ly - dung mo hinh
-PhoBERT-AMP (Adaptive Metadata-aware PhoBERT).
+PhoBERT-AMP v2 (Adaptive Metadata-aware PhoBERT + Cross-Attention).
 
 QUAN TRONG: predict.py tu chay lai DUNG pipeline tien xu ly da dung luc
 chuan bi du lieu train (TextCleaner.clean -> WordSegmenter.segment) truoc
 khi dua vao tokenizer. Neu bo qua buoc nay, ket qua se sai lech do
 "train-serve skew".
 
-Ket qua du doan bao gom `gate_score` - muc do mo hinh su dung metadata
-cho tung binh luan (0 = chi dung text, 1 = dung toan bo metadata).
+Ket qua du doan bao gom:
+  - `gate_score` - muc do mo hinh su dung metadata cho tung binh luan
+    (0 = chi dung text, 1 = dung toan bo metadata)
+  - `attention_weights` - trong so cross-attention cho tung metadata field
+    (cho biet metadata nao lien quan hon voi noi dung binh luan)
 
 Dung nhu 1 module (import SentimentPredictor) hoac chay truc tiep tu CLI:
-    python -m src.predict --text "Giao hàng nhanh, sản phẩm dùng tốt" --rating 5 --num_likes 12
+    python -m src.predict --text "Giao hàng nhanh, sản phẩm dùng tốt" --has_image 1
     python -m src.predict --input_csv data/raw/new_comments.csv --output_csv outputs/reports/predictions.csv
 """
 
@@ -56,6 +59,7 @@ class SentimentPredictor:
         self.model, self.model_config = load_model_for_inference(checkpoint_path, self.device)
         self.tokenizer = load_tokenizer(self.model_config["phobert_model_name"])
         self.metadata_processor = MetadataProcessor.load(metadata_scaler_path)
+        self.metadata_columns = getattr(self.metadata_processor, "columns", cfg.METADATA_COLUMNS)
 
         self.cleaner = TextCleaner()
         self.segmenter = WordSegmenter()
@@ -72,14 +76,22 @@ class SentimentPredictor:
 
         Args:
             text: van ban THO (chua xu ly gi ca) - vd nguoi dung nhap truc tiep.
-            metadata: dict cac truong metadata (vd {"rating": 5, "num_likes": 3,
-                "quality": 4.0}). Thieu truong nao se duoc dien gia
-                tri hoc tu tap train (xem MetadataProcessor).
+            metadata: dict cac truong metadata (vd {"has_image": 0}).
+                Thieu truong nao se duoc dien gia tri hoc tu tap train (xem MetadataProcessor).
+                comment_length va word_count se duoc TU DONG tinh tu text
+                neu khong truyen.
 
         Returns:
             dict: {"label": str, "confidence": float, "probabilities": {label: prob}}
         """
-        results = self.predict_batch([text], [metadata or {}])
+        if metadata is None:
+            metadata = {}
+        # Tu dong tinh comment_length va word_count tu text goc neu chua co
+        if "comment_length" not in metadata:
+            metadata["comment_length"] = len(text)
+        if "word_count" not in metadata:
+            metadata["word_count"] = len(text.split())
+        results = self.predict_batch([text], [metadata])
         return results[0]
 
     @torch.no_grad()
@@ -89,6 +101,13 @@ class SentimentPredictor:
         if metadata_list is None:
             metadata_list = [{} for _ in texts]
         assert len(texts) == len(metadata_list)
+
+        # Tu dong tinh comment_length va word_count cho tung binh luan neu chua co
+        for i, (text, meta) in enumerate(zip(texts, metadata_list)):
+            if "comment_length" not in meta:
+                meta["comment_length"] = len(text)
+            if "word_count" not in meta:
+                meta["word_count"] = len(text.split())
 
         segmented_texts = [self._preprocess_text(t) for t in texts]
         metadata_df = pd.DataFrame(metadata_list)
@@ -104,19 +123,33 @@ class SentimentPredictor:
         metadata_tensor = torch.tensor(metadata_array, dtype=torch.float)
 
         self.model.eval()
-        # Dung predict_with_gate de lay ca xac suat va gate_score
-        probs, gate_scores = self.model.predict_with_gate(
+        # Dung predict_with_gate de lay xac suat, gate_score va attention_weights
+        probs, gate_scores, attn_weights = self.model.predict_with_gate(
             encodings["input_ids"].to(self.device),
             encodings["attention_mask"].to(self.device),
             metadata_tensor.to(self.device),
         )
         probs = probs.cpu().numpy()
         gate_scores = gate_scores.cpu().numpy()
+        attn_weights = attn_weights.cpu().numpy()
 
         results = []
+        num_attn_fields = attn_weights.shape[1]
+        if hasattr(self, "metadata_columns") and len(self.metadata_columns) == num_attn_fields:
+            field_names = self.metadata_columns
+        elif len(cfg.METADATA_COLUMNS) == num_attn_fields:
+            field_names = cfg.METADATA_COLUMNS
+        else:
+            field_names = [f"field_{k}" for k in range(num_attn_fields)]
+
         for i in range(len(texts)):
             row_probs = {cfg.ID2LABEL[j]: float(probs[i, j]) for j in range(len(cfg.LABEL_LIST))}
             pred_id = int(probs[i].argmax())
+            # Chuyen attention weights thanh dict {field_name: weight}
+            row_attn = {
+                field_names[j]: float(attn_weights[i, j])
+                for j in range(num_attn_fields)
+            }
             results.append(
                 {
                     "text": texts[i],
@@ -125,6 +158,7 @@ class SentimentPredictor:
                     "confidence": float(probs[i, pred_id]),
                     "probabilities": row_probs,
                     "gate_score": float(gate_scores[i, 0]),
+                    "attention_weights": row_attn,
                 }
             )
         return results
@@ -137,9 +171,12 @@ def _cli():
     parser.add_argument("--metadata_scaler", default=cfg.METADATA_SCALER_PATH)
 
     parser.add_argument("--text", type=str, help="Một bình luận duy nhất cần dự đoán")
-    parser.add_argument("--rating", type=float, default=None)
-    parser.add_argument("--num_likes", type=float, default=None)
-    parser.add_argument("--quality", type=float, default=None)
+    parser.add_argument("--comment_length", type=int, default=None,
+                       help="Độ dài bình luận (số ký tự). Tự tính nếu không truyền.")
+    parser.add_argument("--word_count", type=int, default=None,
+                       help="Số từ trong bình luận. Tự tính nếu không truyền.")
+    parser.add_argument("--has_image", type=int, default=None, choices=[0, 1],
+                       help="Bình luận có ảnh hay không (1=có, 0=không)")
 
     parser.add_argument("--input_csv", type=str, help="File CSV chứa nhiều bình luận cần dự đoán")
     parser.add_argument("--text_column", type=str, default=cfg.TEXT_COLUMN)
@@ -153,17 +190,20 @@ def _cli():
 
     if args.text:
         metadata = {}
-        if args.rating is not None:
-            metadata["rating"] = args.rating
-        if args.num_likes is not None:
-            metadata["num_likes"] = args.num_likes
-        if args.quality is not None:
-            metadata["quality"] = args.quality
+        if args.comment_length is not None:
+            metadata["comment_length"] = args.comment_length
+        if args.word_count is not None:
+            metadata["word_count"] = args.word_count
+        if args.has_image is not None:
+            metadata["has_image"] = args.has_image
 
         result = predictor.predict(args.text, metadata)
         print(f"Bình luận : {result['text']}")
         print(f"Nhãn dự đoán: {result['label']}  (độ tin cậy: {result['confidence']:.2%})")
         print(f"Gate Score : {result['gate_score']:.3f} (mức sử dụng metadata: 0=chỉ text, 1=dùng đầy đủ)")
+        if result.get("attention_weights"):
+            attn_str = ", ".join(f"{k}={v:.3f}" for k, v in result["attention_weights"].items())
+            print(f"Attention  : [{attn_str}] (trọng số cross-attention cho từng metadata field)")
         print("Chi tiết xác suất:")
         for label, prob in result["probabilities"].items():
             print(f"  - {label:>8}: {prob:.2%}")
